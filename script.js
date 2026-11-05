@@ -11,7 +11,136 @@ function escapeHtml(str) {
 function escapeAttr(str) {
   if (!str) return "";
   return String(str).replace(/"/g, "&quot;");
-} /* Helper lấy chuỗi giờ hiện tại theo giờ Việt Nam UTC+7 chuẩn xác*/
+}
+function initFlagGlobes() {
+  var globes = Array.from(document.querySelectorAll("canvas.flag-globe"));
+  var states = [];
+
+  globes.forEach(function (canvas) {
+    var mapValue = getComputedStyle(canvas)
+      .getPropertyValue("--globe-map")
+      .trim();
+    var mapUrl = mapValue.replace(/^url\(["']?/, "").replace(/["']?\)$/, "");
+    var context = canvas.getContext("2d");
+    if (!mapUrl || !context) {
+      console.error("Unable to initialize flag globe:", canvas);
+      return;
+    }
+
+    var image = new Image();
+    var state = {
+      canvas: canvas,
+      context: context,
+      texture: null,
+      frame: null,
+      width: 0,
+      height: 0,
+      rotation: 0,
+    };
+    image.onload = function () {
+      var textureCanvas = document.createElement("canvas");
+      textureCanvas.width = image.naturalWidth;
+      textureCanvas.height = image.naturalHeight;
+      var textureContext = textureCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
+      if (!textureContext) {
+        console.error("Unable to read flag texture:", canvas);
+        return;
+      }
+      textureContext.drawImage(image, 0, 0);
+      state.texture = textureContext.getImageData(
+        0,
+        0,
+        textureCanvas.width,
+        textureCanvas.height,
+      );
+    };
+    image.onerror = function () {
+      console.error("Unable to load flag texture:", canvas);
+    };
+    image.src = mapUrl;
+    states.push(state);
+  });
+
+  function drawFlagGlobe(state) {
+    if (!state.texture) return;
+    var bounds = state.canvas.getBoundingClientRect();
+    var pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    var width = Math.max(1, Math.round(bounds.width * pixelRatio));
+    var height = Math.max(1, Math.round(bounds.height * pixelRatio));
+    if (width !== state.width || height !== state.height) {
+      state.canvas.width = width;
+      state.canvas.height = height;
+      state.width = width;
+      state.height = height;
+      state.frame = state.context.createImageData(width, height);
+    }
+
+    var texture = state.texture;
+    var output = state.frame.data;
+    var rotation = state.rotation;
+    var lightX = -0.45;
+    var lightY = -0.5;
+    var lightZ = 0.75;
+    for (var y = 0; y < height; y++) {
+      var ny = ((y + 0.5) / height) * 2 - 1;
+      for (var x = 0; x < width; x++) {
+        var nx = ((x + 0.5) / width) * 2 - 1;
+        var radiusSquared = nx * nx + ny * ny;
+        var outputIndex = (y * width + x) * 4;
+        if (radiusSquared > 1) {
+          output[outputIndex + 3] = 0;
+          continue;
+        }
+
+        var nz = Math.sqrt(1 - radiusSquared);
+        var longitude = Math.atan2(nx, nz) / (Math.PI * 2) + 0.5 + rotation;
+        longitude -= Math.floor(longitude);
+        var latitude = 0.5 - Math.asin(-ny) / Math.PI;
+        var sourceX = Math.min(
+          texture.width - 1,
+          Math.floor(longitude * texture.width),
+        );
+        var sourceY = Math.min(
+          texture.height - 1,
+          Math.floor(latitude * texture.height),
+        );
+        var sourceIndex = (sourceY * texture.width + sourceX) * 4;
+        var diffuse = Math.max(
+          0,
+          nx * lightX - ny * lightY + nz * lightZ,
+        );
+        var brightness =
+          0.28 + diffuse * 0.72 + Math.pow(diffuse, 24) * 0.08;
+        output[outputIndex] = texture.data[sourceIndex] * brightness;
+        output[outputIndex + 1] = texture.data[sourceIndex + 1] * brightness;
+        output[outputIndex + 2] = texture.data[sourceIndex + 2] * brightness;
+        output[outputIndex + 3] = 255;
+      }
+    }
+    state.context.putImageData(state.frame, 0, 0);
+  }
+
+  var lastFrameTime = null;
+  function animateFlagGlobes(time) {
+    if (lastFrameTime === null) {
+      lastFrameTime = time;
+    } else {
+      var elapsed = Math.min(time - lastFrameTime, 50);
+      if (elapsed >= 30) {
+        states.forEach(function (state) {
+          state.rotation = (state.rotation + elapsed * 0.00028) % 1;
+          drawFlagGlobe(state);
+        });
+        lastFrameTime = time;
+      }
+    }
+    window.requestAnimationFrame(animateFlagGlobes);
+  }
+  window.requestAnimationFrame(animateFlagGlobes);
+}
+initFlagGlobes(); /* Helper lấy chuỗi giờ hiện tại theo giờ Việt Nam UTC+7 chuẩn xác*/
 function getNowUtc7String() {
   var now = new Date();
   var utc = now.getTime() + now.getTimezoneOffset() * 60000;
